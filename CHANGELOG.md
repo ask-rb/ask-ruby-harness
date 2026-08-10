@@ -1,3 +1,13 @@
+## [0.2.0] — 2026-08-10
+
+### Added
+
+- **Monorepo support in `run_tests`** — when the `file:` param points into a
+  subproject (a directory with its own Gemfile/Rakefile), the suite runs
+  there, so rake/rails resolve the subproject's tasks. Artifacts
+  (`tmp/test/.ask/`) live in the subproject too. (The MCP server for this
+  gem lives in the separate `ask-ruby-harness-mcp` gem.)
+
 ## [0.1.0] — 2026-08-10
 
 ### Added

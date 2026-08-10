@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "json"
+require "active_support/notifications"
 require "active_support/core_ext/string/filters"
 
 module Ask

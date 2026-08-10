@@ -24,34 +24,38 @@ module Ask
 
           def execute(file: nil, name: nil, failed_only: false, timeout: DEFAULT_TIMEOUT)
             files = split_files(file)
-            runner = detect_runner
+            # Monorepo support: a file inside a subproject (a dir with its
+            # own Gemfile/Rakefile) runs that project's suite.
+            run_root = resolve_run_root(files)
+            files = files.map { |f| rel_to_run_root(f, run_root) }
+            runner = detect_runner(run_root)
 
-            failed_tests = failed_only ? load_failed_tests : nil
+            failed_tests = failed_only ? load_failed_tests(run_root) : nil
             if failed_only && failed_tests.empty?
               return Ask::Result.failure("No failed tests from the previous run to rerun.")
             end
 
-            artifact_dir = app_root.join(*ARTIFACT_DIR).tap(&:mkpath)
+            artifact_dir = run_root.join(*ARTIFACT_DIR).tap(&:mkpath)
             log_path = artifact_dir.join("last-test.log")
             json_path = artifact_dir.join("last-test.json")
             status_path = artifact_dir.join("last-failures.json")
 
             command, env = build_command(runner, files, name, failed_tests, json_path)
-            outcome = run(command, env, log_path, timeout)
+            outcome = run(command, env, log_path, timeout, run_root)
 
             results = parse_results(runner, json_path)
             unless results
               # A killed run can't produce results — report it structurally
               # instead of failing, so the agent still gets the artifact path.
-              return Ask::Result.ok(data: timed_out_report(runner, command, env, outcome, status_path, log_path)) if outcome[:timed_out]
+              return Ask::Result.ok(data: timed_out_report(runner, command, env, outcome, status_path, log_path, run_root)) if outcome[:timed_out]
 
               return Ask::Result.failure(
                 "Test run finished without machine-readable results (#{runner}); " \
-                "full output at #{rel(log_path)}"
+                "full output at #{rel(log_path, run_root)}"
               )
             end
 
-            report = build_report(runner, command, env, outcome, results, status_path, log_path)
+            report = build_report(runner, command, env, outcome, results, status_path, log_path, run_root)
             Ask::Result.ok(data: report)
           end
 
@@ -64,12 +68,37 @@ module Ask
 
           # Rails app → bin/rails test; rspec in the bundle with a spec/ dir →
           # rspec; anything else → minitest via rake test.
-          def detect_runner
-            return :rails if app_root.join("bin", "rails").exist?
-            lockfile = app_root.join("Gemfile.lock")
+          def detect_runner(run_root)
+            return :rails if run_root.join("bin", "rails").exist?
+            lockfile = run_root.join("Gemfile.lock")
             rspec = lockfile.exist? && lockfile.read.include?("rspec")
-            return :rspec if rspec && app_root.join("spec").directory?
+            return :rspec if rspec && run_root.join("spec").directory?
             :minitest
+          end
+
+          # --- monorepo support -------------------------------------------
+
+          # For a file inside a subproject of a monorepo (a dir with its own
+          # Gemfile/Rakefile), run the suite there so rake/rails resolve the
+          # subproject's tasks. Only when ALL files share the same subproject;
+          # otherwise (or at the app root itself) fall back to app_root.
+          def resolve_run_root(files)
+            roots = files.map { |f| project_root_for(f) }.uniq
+            roots.size == 1 && !roots.first.nil? ? roots.first : app_root
+          end
+
+          def project_root_for(file)
+            dir = File.expand_path(File.dirname(file), app_root)
+            root = app_root.to_s
+            while dir != root && dir.start_with?(root + File::SEPARATOR)
+              return Pathname.new(dir) if %w[Gemfile Rakefile].any? { |n| File.exist?(File.join(dir, n)) }
+              dir = File.dirname(dir)
+            end
+            nil
+          end
+
+          def rel_to_run_root(file, run_root)
+            Pathname.new(File.expand_path(file, app_root)).relative_path_from(run_root).to_s
           end
 
           def build_command(runner, files, name, failed_tests, json_path)
@@ -129,7 +158,7 @@ module Ask
             "/#{escaped.join('|')}/"
           end
 
-          def run(command, env, log_path, timeout)
+          def run(command, env, log_path, timeout, run_root)
             # The harness server may run with a deliberately small pool
             # (e.g. RAILS_MAX_THREADS=1 in its MCP config). Test runs are a
             # separate concern — let them use the app's normal pool sizes and
@@ -139,7 +168,7 @@ module Ask
             # would otherwise hijack it).
             child_env = env.merge("RAILS_MAX_THREADS" => nil)
             ENV.each_key { |k| child_env[k] = nil if k.start_with?("BUNDLE") }
-            pid = Process.spawn(child_env, *command, chdir: app_root.to_s,
+            pid = Process.spawn(child_env, *command, chdir: run_root.to_s,
                                 out: [log_path.to_s, "w"], err: [:child, :out])
             status = nil
             timed_out = false
@@ -159,7 +188,7 @@ module Ask
             { exit_status: status&.exitstatus, timed_out: timed_out }
           end
 
-          def build_report(runner, command, env, outcome, results, status_path, log_path)
+          def build_report(runner, command, env, outcome, results, status_path, log_path, run_root)
             summary = results[:summary]
             failed_tests = results[:failed_tests]
             persist_failed_tests(runner, failed_tests, status_path)
@@ -171,12 +200,12 @@ module Ask
               timed_out: outcome[:timed_out],
               summary: summary,
               failed_tests: failed_tests,
-              artifact: rel(log_path),
+              artifact: rel(log_path, run_root),
               next: summary[:failures] + summary[:errors] > 0 ? "run_tests(failed_only: true)" : nil
             }
           end
 
-          def timed_out_report(runner, command, env, outcome, status_path, log_path)
+          def timed_out_report(runner, command, env, outcome, status_path, log_path, run_root)
             persist_failed_tests(runner, [], status_path)
             {
               framework: runner.to_s,
@@ -185,7 +214,7 @@ module Ask
               timed_out: true,
               summary: nil,
               failed_tests: nil,
-              artifact: rel(log_path),
+              artifact: rel(log_path, run_root),
               next: nil
             }
           end
@@ -240,8 +269,8 @@ module Ask
             status_path.write(JSON.pretty_generate(framework: runner.to_s, failed_tests: failed_tests))
           end
 
-          def load_failed_tests
-            path = app_root.join(*ARTIFACT_DIR, "last-failures.json")
+          def load_failed_tests(run_root)
+            path = run_root.join(*ARTIFACT_DIR, "last-failures.json")
             return [] unless path.exist?
             JSON.parse(path.read).fetch("failed_tests", []).map { |t| symbolize_keys(t) }
           rescue JSON::ParserError
@@ -252,8 +281,8 @@ module Ask
             hash.each_with_object({}) { |(k, v), h| h[k.to_sym] = v }
           end
 
-          def rel(path)
-            path.relative_path_from(app_root).to_s
+          def rel(path, base = app_root)
+            path.relative_path_from(base).to_s
           end
         end
       end

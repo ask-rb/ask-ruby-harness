@@ -89,20 +89,44 @@ class RunTestsTest < Minitest::Test
   # --- runner detection ----------------------------------------------------
 
   def test_detects_rails_when_bin_rails_exists
-    assert_equal :rails, @tool.send(:detect_runner)
+    assert_equal :rails, @tool.send(:detect_runner, Pathname.new(@root))
   end
 
   def test_detects_rspec_when_rspec_rails_and_spec_dir
     FileUtils.rm(File.join(@root, "bin", "rails"))
     File.write(File.join(@root, "Gemfile.lock"), "      rspec-rails (~> 7.0)\n")
     FileUtils.mkdir_p(File.join(@root, "spec"))
-    assert_equal :rspec, @tool.send(:detect_runner)
+    assert_equal :rspec, @tool.send(:detect_runner, Pathname.new(@root))
   end
 
   def test_detects_minitest_for_plain_ruby_project
     FileUtils.rm(File.join(@root, "bin", "rails"))
     File.write(File.join(@root, "Gemfile.lock"), "GEM\n  remote: https://rubygems.org/\n")
-    assert_equal :minitest, @tool.send(:detect_runner)
+    assert_equal :minitest, @tool.send(:detect_runner, Pathname.new(@root))
+  end
+
+  # --- monorepo support ----------------------------------------------------
+
+  def test_project_root_for_file_in_subproject
+    sub = File.join(@root, "gems", "ask-mcp")
+    FileUtils.mkdir_p(File.join(sub, "test"))
+    File.write(File.join(sub, "Gemfile"), "source \"https://rubygems.org\"\n")
+
+    assert_equal Pathname.new(sub),
+                 @tool.send(:project_root_for, "gems/ask-mcp/test/widget_test.rb")
+  end
+
+  def test_project_root_returns_nil_for_files_at_app_root
+    assert_nil @tool.send(:project_root_for, "test/scratch_test.rb")
+  end
+
+  def test_resolve_run_root_falls_back_to_app_root_for_multiple_projects
+    sub = File.join(@root, "gems", "ask-mcp")
+    FileUtils.mkdir_p(File.join(sub, "test"))
+    File.write(File.join(sub, "Gemfile"), "source \"https://rubygems.org\"\n")
+
+    files = ["gems/ask-mcp/test/widget_test.rb", "test/scratch_test.rb"]
+    assert_equal Pathname.new(@root), @tool.send(:resolve_run_root, files)
   end
 
   # --- command building ----------------------------------------------------
@@ -362,5 +386,44 @@ class RunTestsTest < Minitest::Test
     assert_includes report[:command], "rake test"
     assert_equal 1, report[:summary][:run]
     assert_equal 0, report[:summary][:failures]
+  end
+
+  def test_execute_runs_subproject_suite_in_monorepo
+    sub = File.join(@root, "gems", "ask-mcp")
+    FileUtils.mkdir_p(File.join(sub, "test"))
+    File.write(File.join(sub, "Gemfile"), <<~RUBY)
+      source "https://rubygems.org"
+      gem "minitest"
+      gem "rake"
+    RUBY
+    File.write(File.join(sub, "Rakefile"), <<~RUBY)
+      require "rake/testtask"
+
+      Rake::TestTask.new(:test) do |t|
+        t.libs << "test"
+        t.test_files = FileList["test/**/*_test.rb"]
+      end
+    RUBY
+    File.write(File.join(sub, "test", "widget_test.rb"), <<~RUBY)
+      require "minitest/autorun"
+      class WidgetTest < Minitest::Test
+        def test_passes; assert true; end
+        def test_fails; assert_equal 1, 2; end
+      end
+    RUBY
+    Bundler.with_unbundled_env do
+      system("bundle", "install", "--local", chdir: sub, out: File::NULL, err: File::NULL) ||
+        system("bundle", "install", chdir: sub, out: File::NULL, err: File::NULL)
+    end
+
+    result = @tool.call({ file: "gems/ask-mcp/test/widget_test.rb" })
+
+    assert result.ok?, "subproject run should succeed: #{result.error_message}"
+    report = result.output
+    assert_equal 2, report[:summary][:run]
+    assert_equal 1, report[:summary][:failures]
+    assert_includes report[:command], "bundle exec rake test"
+    assert report[:artifact].start_with?("tmp/test/.ask/")
+    assert File.exist?(File.join(sub, report[:artifact])), "artifact should live in the subproject"
   end
 end
