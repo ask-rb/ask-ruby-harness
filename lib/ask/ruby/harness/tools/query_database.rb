@@ -30,10 +30,10 @@ module Ask
               )
             end
 
-            unless Ask::Ruby::Harness.database_connected?
+            unless Ask::Ruby::Harness.database_configured?
               Ask::Ruby::Harness.connect_database!
             end
-            unless Ask::Ruby::Harness.database_connected?
+            unless Ask::Ruby::Harness.database_configured?
               return Ask::Result.failure(
                 "Database not connected. Set ASK_DATABASE_URL or provide a config/database.yml."
               )

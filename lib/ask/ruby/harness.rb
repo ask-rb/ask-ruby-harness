@@ -72,7 +72,7 @@ module Ask
         #
         # Connection sources, in order: ASK_DATABASE_URL, config/database.yml.
         def connect_database!
-          return if database_connected?
+          return if database_configured?
 
           config = ENV["ASK_DATABASE_URL"] || database_config_from_yaml
           ActiveRecord::Base.establish_connection(config) if config
@@ -80,8 +80,17 @@ module Ask
           warn "[ask-ruby-harness] database connect failed: #{e.message}"
         end
 
-        def database_connected?
-          defined?(ActiveRecord::Base) && ActiveRecord::Base.connected?
+        # Whether a connection spec is defined. Uses the pool presence, not
+        # `connected?` — ActiveRecord's connected? stays false until a
+        # connection is actually checked out, while pool.with_connection
+        # establishes lazily on first use.
+        def database_configured?
+          defined?(ActiveRecord::Base) &&
+            ActiveRecord::Base.connection_handler.retrieve_connection_pool(
+              ActiveRecord::Base.connection_specification_name
+            )
+        rescue StandardError
+          false
         end
 
         private
@@ -178,7 +187,14 @@ module Ask
           section = section["primary"] if section.is_a?(Hash) && section["primary"].is_a?(Hash)
           return nil unless section.is_a?(Hash)
 
-          section.slice(*Configuration::DATABASE_CONFIG_KEYS).presence
+          config = section.slice(*Configuration::DATABASE_CONFIG_KEYS)
+          # Resolve relative sqlite paths against app_root, like Rails does —
+          # the harness may run with a different cwd than the project root.
+          if config["adapter"].to_s.include?("sqlite") &&
+             config["database"] && !config["database"].start_with?("/", ":")
+            config["database"] = app_root.join(config["database"]).to_s
+          end
+          config.presence
         rescue Psych::Exception
           nil
         end

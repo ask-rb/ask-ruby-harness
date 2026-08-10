@@ -1,3 +1,14 @@
+## [0.2.1] — 2026-08-10
+
+### Fixed
+
+- **Standalone DB connection guard** — `QueryDatabase` now checks whether a
+  connection spec is *defined* (pool presence) instead of `connected?`
+  (which stays false until the first checkout), so `establish_connection`
+  from `ASK_DATABASE_URL`/`database.yml` is actually honored.
+- **Relative sqlite paths in `database.yml`** — resolved against the app
+  root (like Rails does) instead of the harness's cwd.
+
 ## [0.2.0] — 2026-08-10
 
 ### Added

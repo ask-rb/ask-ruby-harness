@@ -132,7 +132,9 @@ class ToolsTest < Minitest::Test
   end
 
   def test_query_database_reports_unconnected_database
-    ActiveRecord::Base.connection.disconnect! if ActiveRecord::Base.connected?
+    # No connection spec defined and nothing to connect with → clean failure.
+    Ask::Ruby::Harness.stubs(:database_configured?).returns(false)
+    Ask::Ruby::Harness.stubs(:connect_database!)
     result = @query_database.call(sql: "SELECT 1")
     assert_instance_of Ask::Result, result
     assert result.error?
