@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require_relative "test_helper"
+require "open3"
+require "rbconfig"
 
 class VersionTest < Minitest::Test
   def test_version_is_set
@@ -42,5 +44,18 @@ class VersionTest < Minitest::Test
     assert_equal "development", Ask::Ruby::Harness.env
   ensure
     original.each { |k, v| v.nil? ? ENV.delete(k) : ENV[k] = v }
+  end
+
+  def test_harness_loads_active_record_when_required_standalone
+    # Regression: the gem must require active_record itself — without it,
+    # ASK_DATABASE_URL connections fail with "uninitialized constant
+    # ActiveRecord" in the MCP server (the test helper masks this by
+    # requiring active_record first).
+    lib = File.expand_path("../lib", __dir__)
+    _out, err, status = Open3.capture3(
+      RbConfig.ruby, "-I", lib, "-e",
+      'require "ask/ruby/harness"; exit(defined?(ActiveRecord::Base) ? 0 : 1)'
+    )
+    assert status.success?, "ask/ruby/harness must load ActiveRecord itself (stderr: #{err[0, 200]})"
   end
 end

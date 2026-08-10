@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "active_record"
 require "ask/agent"
 require "time"
 require "yaml"
@@ -93,6 +94,22 @@ module Ask
           false
         end
 
+        # Config for a NAMED database. Resolution order:
+        #   1. the host app's own configurations registry (Rails multi-DB —
+        #      resolves credentials/ENV for us),
+        #   2. config/database.yml, the environment section's key.
+        def database_config_for(name)
+          name = name.to_s
+          if ActiveRecord::Base.respond_to?(:configurations)
+            db = ActiveRecord::Base.configurations.configs_for(env_name: env, name: name)
+            return sanitize_database_config(db.configuration_hash.transform_keys(&:to_s)) if db
+          end
+
+          section = database_yaml_section
+          config = section[name] if section.is_a?(Hash) && section[name].is_a?(Hash)
+          sanitize_database_config(config)
+        end
+
         private
 
         def build_environment_hooks
@@ -177,17 +194,30 @@ module Ask
           tools
         end
 
+        # Config for the primary database: the `primary` section (Rails
+        # multi-DB style) or the whole environment section of database.yml.
         def database_config_from_yaml
+          section = database_yaml_section
+          config = section["primary"].is_a?(Hash) ? section["primary"] : section
+          sanitize_database_config(config)
+        end
+
+        private
+
+        def database_yaml_section
           path = app_root.join("config", "database.yml")
           return nil unless path.exist?
 
           yaml = YAML.safe_load(path.read, aliases: true) || {}
-          section = yaml[env] || yaml["development"] || {}
-          # Rails-style multi-database config nests the primary under a key.
-          section = section["primary"] if section.is_a?(Hash) && section["primary"].is_a?(Hash)
-          return nil unless section.is_a?(Hash)
+          yaml[env] || yaml["development"] || {}
+        rescue Psych::Exception
+          nil
+        end
 
-          config = section.slice(*Configuration::DATABASE_CONFIG_KEYS)
+        def sanitize_database_config(config)
+          return nil unless config.is_a?(Hash)
+
+          config = config.slice(*Configuration::DATABASE_CONFIG_KEYS)
           # Resolve relative sqlite paths against app_root, like Rails does —
           # the harness may run with a different cwd than the project root.
           if config["adapter"].to_s.include?("sqlite") &&
@@ -195,8 +225,6 @@ module Ask
             config["database"] = app_root.join(config["database"]).to_s
           end
           config.presence
-        rescue Psych::Exception
-          nil
         end
 
         def default_system_prompt

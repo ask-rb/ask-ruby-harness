@@ -1,3 +1,21 @@
+## [0.3.0] — 2026-08-10
+
+### Added
+
+- **Multi-database support in `QueryDatabase`** — new `database:` param to
+  target any named database: a `config/database.yml` key (resolved first
+  through the host app's own configurations registry, so Rails multi-DB
+  apps work with credential-resolved configs) or a full connection URL.
+  The result reports which database was queried. Write guards apply to all
+  databases.
+
+### Fixed
+
+- **The gem now requires `active_record` itself** — previously the harness
+  only loaded AR when the host did, so standalone processes (the MCP
+  server) failed `ASK_DATABASE_URL` connections with "uninitialized
+  constant ActiveRecord".
+
 ## [0.2.1] — 2026-08-10
 
 ### Fixed

@@ -141,6 +141,45 @@ class ToolsTest < Minitest::Test
     assert_includes result.error.to_s, "Database not connected"
   end
 
+  def test_query_database_reports_primary_database
+    with_test_db do |_db|
+      result = @query_database.call(sql: "SELECT 1")
+      assert_instance_of Hash, result
+      assert_equal "primary", result[:database]
+    end
+  end
+
+  # --- multi-database support ---
+
+  def test_query_database_with_named_database
+    with_multi_db_config do |_primary, archive|
+      result = @query_database.call(sql: "SELECT * FROM archive_items ORDER BY id", database: "archive")
+      assert_instance_of Hash, result, "Expected Hash but got #{result.class}"
+      assert_equal "archive", result[:database]
+      assert_equal %w[id name], result[:columns]
+      assert_equal "from_archive", result[:rows][0]["name"]
+      assert_equal 1, result[:count]
+    end
+  end
+
+  def test_query_database_with_missing_database_name
+    with_app_root do |dir|
+      result = @query_database.call(sql: "SELECT 1", database: "nonexistent_db")
+      assert_instance_of Ask::Result, result
+      assert result.error?
+      assert_includes result.error.to_s, "nonexistent_db"
+    end
+  end
+
+  def test_query_database_with_url
+    with_temp_db_file do |path|
+      result = @query_database.call(sql: "SELECT * FROM url_items", database: "sqlite3://#{path}")
+      assert_instance_of Hash, result
+      assert_equal "url_items.db", result[:database]
+      assert_equal 1, result[:count]
+    end
+  end
+
   # --- ReadModel tests ---
 
   def test_read_model_defines_correct_params
@@ -349,6 +388,58 @@ class ToolsTest < Minitest::Test
     yield
   ensure
     original.each { |k, v| v.nil? ? ENV.delete(k) : ENV[k] = v }
+  end
+
+  def with_temp_db_file
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "url_items.db")
+      ActiveRecord::Base.establish_connection(adapter: "sqlite3", database: path)
+      conn = ActiveRecord::Base.connection
+      conn.create_table(:url_items) { |t| t.string :name }
+      conn.insert("INSERT INTO url_items (name) VALUES ('via_url')")
+      yield path
+    ensure
+      ActiveRecord::Base.connection_handler.clear_all_connections!
+    end
+  end
+
+  # Multi-database scratch app: database.yml with a primary and an archive
+  # database, each with its own table and data.
+  def with_multi_db_config
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p(File.join(dir, "db"))
+      FileUtils.mkdir_p(File.join(dir, "config"))
+      primary_path = File.join(dir, "db", "primary.db")
+      archive_path = File.join(dir, "db", "archive.db")
+
+      primary = ActiveRecord::Base.establish_connection(adapter: "sqlite3", database: primary_path)
+      primary = ActiveRecord::Base.connection
+      primary.create_table(:test_items) { |t| t.string :name }
+      primary.insert("INSERT INTO test_items (name) VALUES ('from_primary')")
+
+      ActiveRecord::Base.establish_connection(adapter: "sqlite3", database: archive_path)
+      archive = ActiveRecord::Base.connection
+      archive.create_table(:archive_items) { |t| t.string :name }
+      archive.insert("INSERT INTO archive_items (name) VALUES ('from_archive')")
+
+      File.write(File.join(dir, "config", "database.yml"), <<~YAML)
+        development:
+          primary:
+            adapter: sqlite3
+            database: db/primary.db
+          archive:
+            adapter: sqlite3
+            database: db/archive.db
+      YAML
+
+      orig_root = Ask::Ruby::Harness.app_root
+      Ask::Ruby::Harness.app_root = dir
+      yield primary, archive
+      Ask::Ruby::Harness.app_root = orig_root
+    ensure
+      ActiveRecord::Base.connection_handler.remove_connection_pool("archive") rescue nil
+      ActiveRecord::Base.connection_handler.clear_all_connections!
+    end
   end
 
   def with_test_db
