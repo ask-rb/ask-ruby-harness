@@ -30,6 +30,14 @@ module Ask
             files = files.map { |f| rel_to_run_root(f, run_root) }
             runner = detect_runner(run_root)
 
+            # rake test only takes files (TEST env); expand directory args to
+            # their *_test.rb files. Rails and rspec expand dirs natively.
+            if runner == :minitest
+              expanded = expand_minitest_directories(files, run_root)
+              return expanded unless expanded.is_a?(Array)
+              files = expanded
+            end
+
             failed_tests = failed_only ? load_failed_tests(run_root) : nil
             if failed_only && failed_tests.empty?
               return Ask::Result.failure("No failed tests from the previous run to rerun.")
@@ -39,6 +47,10 @@ module Ask
             log_path = artifact_dir.join("last-test.log")
             json_path = artifact_dir.join("last-test.json")
             status_path = artifact_dir.join("last-failures.json")
+
+            # A child that produces no JSON must not be masked by a previous
+            # run's stale file — parse_results only looks at this path.
+            json_path.delete if json_path.exist?
 
             command, env = build_command(runner, files, name, failed_tests, json_path)
             outcome = run(command, env, log_path, timeout, run_root)
@@ -101,6 +113,25 @@ module Ask
             Pathname.new(File.expand_path(file, app_root)).relative_path_from(run_root).to_s
           end
 
+          # rake_test_loader requires each arg as a file — a directory arg
+          # explodes ("cannot load such file -- .../test"). Replace directory
+          # args with the *_test.rb files under them (relative to run_root),
+          # mirroring the standard Rake::TestTask pattern.
+          def expand_minitest_directories(files, run_root)
+            files.flat_map do |f|
+              dir = File.join(run_root.to_s, f)
+              next f unless File.directory?(dir)
+
+              matches = Dir.glob(File.join(dir, "**", "*_test.rb"))
+                          .map { |m| Pathname.new(m).relative_path_from(run_root).to_s }
+                          .uniq
+              if matches.empty?
+                return Ask::Result.failure("No *_test.rb files found under '#{f}'.")
+              end
+              matches
+            end.uniq
+          end
+
           def build_command(runner, files, name, failed_tests, json_path)
             case runner
             when :rspec
@@ -125,11 +156,25 @@ module Ask
               # arrives via RUBYOPT like everywhere else.
               args = ["bundle", "exec", "rake", "test"]
               env = injection_env(json_path)
-              env["TEST"] = files.first if files.size == 1
+              # Rake::TestTask reads TEST/TESTOPTS from the environment, so
+              # the child inherits whatever the parent run carried (nested
+              # runs!) unless it's overwritten or cleared here — a stray TEST
+              # pointing at the outer project's files would abort the inner
+              # run before any test loads.
+              env["TEST"] = files.any? ? files.join(",") : nil
               testopts = []
               testopts << "--name=#{name}" if name
               testopts << "--name=#{name_pattern(failed_tests)}" if failed_tests
-              env["TESTOPTS"] = testopts.join(" ") unless testopts.empty?
+              if testopts.empty?
+                env["TESTOPTS"] = nil
+              else
+                # rake's test task runs ruby through the shell, so unquoted
+                # TESTOPTS with `|` (failed_only alternations) or spaces gets
+                # split into bogus commands. Quote each option so it survives
+                # as one ARGV entry in rake_test_loader.
+                env["TESTOPTS"] = testopts.map { |o| "\"#{o}\"" }.join(" ")
+              end
+              %w[TESTOPT TEST_OPTS TEST_OPT].each { |k| env[k] = nil }
               [args, env]
             end
           end

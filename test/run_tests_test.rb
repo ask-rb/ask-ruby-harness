@@ -170,17 +170,61 @@ class RunTestsTest < Minitest::Test
     assert_equal ["bundle", "exec", "rake", "test"], command
     assert_equal "test/scratch_test.rb", env["TEST"]
     # Rake::TestTask keeps only `-`-prefixed ARGV entries as options, so the
-    # filter must use the attached --name= form.
-    assert_equal "--name=test_passes", env["TESTOPTS"]
+    # filter must use the attached --name= form; rake runs ruby through the
+    # shell, so the option must be quoted to survive as one ARGV entry.
+    assert_equal "\"--name=test_passes\"", env["TESTOPTS"]
     assert_equal "/tmp/r.json", env["ASK_TEST_JSON_PATH"]
     assert_includes env["RUBYOPT"], "ask_ruby_harness_plugin.rb"
+  end
+
+  def test_minitest_command_quotes_failed_only_alternation_in_testopts
+    failed = [{ file: "test/a_test.rb", test_name: "test_one" },
+              { file: "test/b_test.rb", test_name: "test_two(extra)" }]
+    command, env = @tool.send(:build_command, :minitest, [], nil, failed,
+                              Pathname.new("/tmp/r.json"))
+    assert_equal ["bundle", "exec", "rake", "test"], command
+    assert_equal "\"--name=/test_one|test_two\\(extra\\)/\"", env["TESTOPTS"]
   end
 
   def test_minitest_command_without_file_or_name_has_no_filter_env
     command, env = @tool.send(:build_command, :minitest, [], nil, nil, Pathname.new("/tmp/r.json"))
     assert_equal ["bundle", "exec", "rake", "test"], command
-    refute env.key?("TEST")
-    refute env.key?("TESTOPTS")
+    # Inherited TEST/TESTOPTS from a parent run would hijack the child's
+    # rake test — the tool must clear them, not leave them alone.
+    assert_nil env["TEST"]
+    assert_nil env["TESTOPTS"]
+    assert_nil env["TESTOPT"]
+    assert_nil env["TEST_OPTS"]
+    assert_nil env["TEST_OPT"]
+  end
+
+  def test_minitest_command_joins_multiple_files_in_test_env
+    command, env = @tool.send(:build_command, :minitest, ["test/a_test.rb", "test/b_test.rb"],
+                              nil, nil, Pathname.new("/tmp/r.json"))
+    assert_equal ["bundle", "exec", "rake", "test"], command
+    assert_equal "test/a_test.rb,test/b_test.rb", env["TEST"]
+  end
+
+  def test_expand_minitest_directories_turns_directories_into_test_files
+    FileUtils.mkdir_p(File.join(@root, "test", "models"))
+    File.write(File.join(@root, "test", "a_test.rb"), "")
+    File.write(File.join(@root, "test", "models", "b_test.rb"), "")
+    File.write(File.join(@root, "test", "helpers.rb"), "")
+
+    files = @tool.send(:expand_minitest_directories, ["test", "test/a_test.rb"],
+                       Pathname.new(@root))
+    assert_equal ["test/a_test.rb", "test/models/b_test.rb", "test/scratch_test.rb"], files
+    refute_includes files, "test/helpers.rb"
+  end
+
+  def test_expand_minitest_directories_returns_failure_when_directory_has_no_test_files
+    FileUtils.mkdir_p(File.join(@root, "test", "empty"))
+    File.write(File.join(@root, "test", "empty", "helpers.rb"), "")
+
+    result = @tool.send(:expand_minitest_directories, ["test/empty"], Pathname.new(@root))
+    assert_instance_of Ask::Result, result
+    refute result.ok?
+    assert_includes result.error_message, "No *_test.rb files found"
   end
 
   # --- result parsing ------------------------------------------------------
@@ -325,6 +369,18 @@ class RunTestsTest < Minitest::Test
     assert_includes result.error_message, "tmp/test/.ask/last-test.log"
   end
 
+  def test_stale_json_from_previous_run_is_not_reported_as_fresh
+    File.write(File.join(@root, "bin", "rails"), "#!/usr/bin/env ruby\nputs 'no json here'\n")
+    File.chmod(0o755, File.join(@root, "bin", "rails"))
+    stale = File.join(@root, "tmp", "test", ".ask", "last-test.json")
+    FileUtils.mkdir_p(File.dirname(stale))
+    File.write(stale, JSON.generate("framework" => "minitest", "run" => 999))
+
+    result = @tool.call({})
+    refute result.ok?, "a run that writes no JSON must fail even with a stale file present"
+    refute File.exist?(stale), "the stale JSON must be removed before the run"
+  end
+
   # --- integration: real rake test in a plain Ruby project ----------------
 
   def test_execute_runs_real_rake_test_in_plain_ruby_project
@@ -388,6 +444,44 @@ class RunTestsTest < Minitest::Test
     assert_equal 0, report[:summary][:failures]
   end
 
+  def test_execute_rake_test_clears_inherited_test_and_testopts
+    # Nested runs (a suite run from run_tests spawning another run_tests)
+    # inherit TEST/TESTOPTS from the parent child. A stray TEST must not
+    # redirect the inner rake test to the outer project's files.
+    FileUtils.rm(File.join(@root, "bin", "rails"))
+    File.write(File.join(@root, "Rakefile"), <<~RUBY)
+      require "rake/testtask"
+
+      Rake::TestTask.new(:test) do |t|
+        t.libs << "test"
+        t.test_files = FileList["test/**/*_test.rb"]
+      end
+    RUBY
+    File.write(File.join(@root, "Gemfile"), <<~RUBY)
+      source "https://rubygems.org"
+      gem "minitest"
+      gem "rake"
+    RUBY
+    Bundler.with_unbundled_env do
+      system("bundle", "install", "--local", chdir: @root, out: File::NULL, err: File::NULL) ||
+        system("bundle", "install", chdir: @root, out: File::NULL, err: File::NULL)
+    end
+
+    ENV["TEST"] = "test/from_parent.rb"
+    ENV["TESTOPTS"] = "--name=from_parent"
+    begin
+      result = @tool.call({})
+    ensure
+      ENV["TEST"] = nil
+      ENV["TESTOPTS"] = nil
+    end
+
+    assert result.ok?, "inherited TEST must be cleared: #{result.error_message}"
+    report = result.output
+    assert_equal 3, report[:summary][:run]
+    assert_equal 1, report[:summary][:failures]
+  end
+
   def test_execute_runs_subproject_suite_in_monorepo
     sub = File.join(@root, "gems", "ask-mcp")
     FileUtils.mkdir_p(File.join(sub, "test"))
@@ -425,5 +519,50 @@ class RunTestsTest < Minitest::Test
     assert_includes report[:command], "bundle exec rake test"
     assert report[:artifact].start_with?("tmp/test/.ask/")
     assert File.exist?(File.join(sub, report[:artifact])), "artifact should live in the subproject"
+  end
+
+  def test_execute_runs_subproject_suite_in_monorepo_with_directory_arg
+    sub = File.join(@root, "gems", "ask-mcp")
+    FileUtils.mkdir_p(File.join(sub, "test", "nested"))
+    File.write(File.join(sub, "Gemfile"), <<~RUBY)
+      source "https://rubygems.org"
+      gem "minitest"
+      gem "rake"
+    RUBY
+    File.write(File.join(sub, "Rakefile"), <<~RUBY)
+      require "rake/testtask"
+
+      Rake::TestTask.new(:test) do |t|
+        t.libs << "test"
+        t.test_files = FileList["test/**/*_test.rb"]
+      end
+    RUBY
+    File.write(File.join(sub, "test", "widget_test.rb"), <<~RUBY)
+      require "minitest/autorun"
+      class WidgetTest < Minitest::Test
+        def test_passes; assert true; end
+        def test_fails; assert_equal 1, 2; end
+      end
+    RUBY
+    File.write(File.join(sub, "test", "nested", "gadget_test.rb"), <<~RUBY)
+      require "minitest/autorun"
+      class GadgetTest < Minitest::Test
+        def test_gadget; assert true; end
+      end
+    RUBY
+    Bundler.with_unbundled_env do
+      system("bundle", "install", "--local", chdir: sub, out: File::NULL, err: File::NULL) ||
+        system("bundle", "install", chdir: sub, out: File::NULL, err: File::NULL)
+    end
+
+    # A directory arg (not a file) must expand to the *_test.rb files under
+    # it instead of being passed to rake_test_loader as a bogus require.
+    result = @tool.call({ file: "gems/ask-mcp/test" })
+
+    assert result.ok?, "subproject dir run should succeed: #{result.error_message}"
+    report = result.output
+    assert_equal 3, report[:summary][:run]
+    assert_equal 1, report[:summary][:failures]
+    assert_includes report[:command], "bundle exec rake test"
   end
 end
