@@ -1,3 +1,16 @@
+## [0.3.2] — 2026-08-12
+
+### Fixed
+
+- **ERB-safe `config/database.yml` parsing** — `database_yaml` now renders
+  ERB (Rails-style) before YAML loading. Raw `YAML.safe_load` choked on the
+  ERB most real database.yml files embed (ENV/credentials), so the named
+  database fallback reported "not found" for those apps.
+- **Env-name lookup for named databases** — `database: "production"` from a
+  development-booted server now resolves that environment's own section in
+  `config/database.yml`: its flat single-DB config, or its `primary` pool
+  for multi-DB apps.
+
 ## [0.3.0] — 2026-08-10
 
 ### Added

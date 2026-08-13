@@ -97,7 +97,11 @@ module Ask
         # Config for a NAMED database. Resolution order:
         #   1. the host app's own configurations registry (Rails multi-DB —
         #      resolves credentials/ENV for us),
-        #   2. config/database.yml, the environment section's key.
+        #   2. config/database.yml, the current environment section's key,
+        #   3. config/database.yml, the named environment section itself —
+        #      "database: production" from a development-booted server
+        #      resolves production's config (its "primary" pool for
+        #      multi-DB apps).
         def database_config_for(name)
           name = name.to_s
           if ActiveRecord::Base.respond_to?(:configurations)
@@ -107,6 +111,15 @@ module Ask
 
           section = database_yaml_section
           config = section[name] if section.is_a?(Hash) && section[name].is_a?(Hash)
+          return sanitize_database_config(config) if config
+
+          yaml = database_yaml
+          env_section = yaml[name] if yaml.is_a?(Hash)
+          return nil unless env_section.is_a?(Hash)
+
+          # Multi-DB apps nest pools under the env key; single-DB apps keep
+          # the connection config flat under it.
+          config = env_section["primary"].is_a?(Hash) ? env_section["primary"] : env_section
           sanitize_database_config(config)
         end
 
@@ -205,12 +218,22 @@ module Ask
         private
 
         def database_yaml_section
+          yaml = database_yaml || {}
+          yaml[env] || yaml["development"] || {}
+        end
+
+        # Parses config/database.yml with ERB preprocessing (Rails-style) —
+        # most real database.yml files embed ENV/credentials ERB, which raw
+        # YAML.safe_load cannot parse. Returns nil when unreadable; the
+        # callers fall back to the Rails configurations registry.
+        def database_yaml
           path = app_root.join("config", "database.yml")
           return nil unless path.exist?
 
-          yaml = YAML.safe_load(path.read, aliases: true) || {}
-          yaml[env] || yaml["development"] || {}
-        rescue Psych::Exception
+          require "erb"
+          rendered = ERB.new(path.read).result
+          YAML.safe_load(rendered, aliases: true) || {}
+        rescue Psych::Exception, NameError, SyntaxError
           nil
         end
 

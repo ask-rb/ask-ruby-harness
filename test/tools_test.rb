@@ -171,6 +171,68 @@ class ToolsTest < Minitest::Test
     end
   end
 
+  def test_query_database_named_env_resolves_single_db_config
+    with_app_root do |dir|
+      FileUtils.mkdir_p(File.join(dir, "config"))
+      File.write(File.join(dir, "config", "database.yml"), <<~YAML)
+        development:
+          adapter: sqlite3
+          database: db/dev.db
+        production:
+          adapter: sqlite3
+          database: db/prod.db
+      YAML
+
+      # An env name that isn't the current env's section resolves that
+      # env's own flat (single-DB) config.
+      config = Ask::Ruby::Harness.database_config_for("production")
+      assert_equal File.expand_path("db/prod.db", dir), config["database"]
+
+      result = @query_database.call(sql: "SELECT 1", database: "production")
+      assert_instance_of Hash, result, "Expected Hash but got #{result.class}"
+      assert_equal "production", result[:database]
+    end
+  end
+
+  def test_database_config_for_parses_erb_yaml
+    with_app_root do |dir|
+      FileUtils.mkdir_p(File.join(dir, "config"))
+      File.write(File.join(dir, "config", "database.yml"), <<~YAML)
+        development:
+          adapter: sqlite3
+          database: <%= ENV["HARNESS_TEST_DB"] %>
+      YAML
+
+      with_env("HARNESS_TEST_DB" => "db/erb.db") do
+        config = Ask::Ruby::Harness.database_config_for("development")
+        assert_equal File.expand_path("db/erb.db", dir), config["database"]
+      end
+    end
+  end
+
+  def test_database_config_for_multi_db_env_uses_primary_pool
+    with_app_root do |dir|
+      FileUtils.mkdir_p(File.join(dir, "config"))
+      File.write(File.join(dir, "config", "database.yml"), <<~YAML)
+        development:
+          primary:
+            adapter: sqlite3
+            database: db/dev.db
+        production:
+          primary:
+            adapter: sqlite3
+            database: db/prod.db
+          queue:
+            adapter: sqlite3
+            database: db/prod_queue.db
+      YAML
+
+      # Multi-DB env sections resolve to the env's "primary" pool.
+      config = Ask::Ruby::Harness.database_config_for("production")
+      assert_equal File.expand_path("db/prod.db", dir), config["database"]
+    end
+  end
+
   def test_query_database_with_url
     with_temp_db_file do |path|
       result = @query_database.call(sql: "SELECT * FROM url_items", database: "sqlite3://#{path}")
