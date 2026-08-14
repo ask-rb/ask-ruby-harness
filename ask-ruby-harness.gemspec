@@ -25,7 +25,7 @@ Gem::Specification.new do |spec|
   spec.require_paths = ["lib"]
 
   spec.add_dependency "activerecord", ">= 7.0"
-  spec.add_dependency "ask-tools", ">= 0.1"
+  spec.add_dependency "ask-tools", ">= 0.6.1"
   spec.add_dependency "ask-tools-shell", ">= 0.1"
   spec.add_dependency "ask-agent", ">= 0.28.0"
 
