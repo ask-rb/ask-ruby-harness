@@ -274,10 +274,12 @@ require_relative "harness/tools/read_model"
 require_relative "harness/tools/read_log"
 require_relative "harness/tools/schema_graph"
 require_relative "harness/tools/run_tests"
+require_relative "harness/tools/dev_url"
 
 # Define after all tool files are loaded so the constants resolve
 Ask::Ruby::Harness::HARNESS_TOOLS = [
   Ask::Ruby::Harness::Tools::RunCommand, Ask::Ruby::Harness::Tools::QueryDatabase,
   Ask::Ruby::Harness::Tools::ReadModel, Ask::Ruby::Harness::Tools::ReadLog,
-  Ask::Ruby::Harness::Tools::SchemaGraph, Ask::Ruby::Harness::Tools::RunTests
+  Ask::Ruby::Harness::Tools::SchemaGraph, Ask::Ruby::Harness::Tools::RunTests,
+  Ask::Ruby::Harness::Tools::DevUrl
 ].freeze

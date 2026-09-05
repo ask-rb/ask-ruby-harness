@@ -14,6 +14,7 @@ access for coding agents. The language edition of the ask-rb harness family
 | `RunCommand` | Run shell commands in the project root, gated by permission rules |
 | `SchemaGraph` | Full schema introspection: models, tables, columns, associations |
 | `RunTests` | Structured test results with failure reruns (rails test / rspec / rake test) |
+| `DevUrl` | ask-local dev URLs: list active routes, resolve a service name to its stable .localhost URL |
 
 Generic file and search capabilities (read, grep, edit) are provided by the
 agent's native tools; the harness focuses on what only an app-aware layer
