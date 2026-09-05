@@ -27,7 +27,7 @@ Gem::Specification.new do |spec|
   spec.add_dependency "activerecord", ">= 7.0"
   spec.add_dependency "ask-tools", ">= 0.6.2"
   spec.add_dependency "ask-tools-shell", ">= 0.6.1"
-  spec.add_dependency "ask-agent", ">= 0.40.1"
+  spec.add_dependency "ask-agent", ">= 0.40.10"
 
   spec.add_development_dependency "sqlite3", ">= 2.0"
   spec.add_development_dependency "minitest", "~> 5.25"
