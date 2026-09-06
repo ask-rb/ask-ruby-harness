@@ -51,6 +51,10 @@ class DevUrlTest < Minitest::Test
   end
 
   def test_get_resolves_variant_from_env
+    FileUtils.mkdir_p(File.join(@dir, "config"))
+    File.write(File.join(@dir, "config", "local.yml"),
+      "service: myapp\nproxy:\n  tld: localhost\nprocesses:\n  web:\n    cmd: s\n    proxy: true")
+    @tool.stubs(:app_root).returns(Pathname.new(@dir))
     ENV["ASK_LOCAL_VARIANT"] = "fix-ui"
     result = @tool.call(action: "get", name: "backend")
     assert_includes result[:url], "fix-ui.backend.localhost"

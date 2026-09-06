@@ -65,13 +65,11 @@ module Ask
           def get(name)
             return Ask::Result.failure("Name is required for action 'get'.") if name.nil? || name.to_s.strip.empty?
 
-            resolved = Ask::Local::Resolver.resolve(
-              app_root.to_s, use_branch: false
-            )
+            resolved = Ask::Local::Resolver.resolve(app_root.to_s)
             hostnames = Ask::Local::Hostname.build(
               app: Ask::Local::Sanitize.hostname_label(name),
-              variant: resolved.variant,
-              tlds: resolved.tlds
+              tlds: [resolved.tld || Ask::Local::Hostname::DEFAULT_TLD],
+              variant: resolved.variant
             )
             store = Ask::Local::RouteStore.new(Ask::Local::Certs.state_dir)
             port = Ask::Local::ProxyControl.proxy_port(store)
@@ -81,7 +79,7 @@ module Ask
               name: name,
               url: url,
               variant: resolved.variant,
-              tlds: resolved.tlds,
+              tld: resolved.tld,
               registered: !store.find(hostnames.first).nil?
             }
           rescue Ask::Local::Error => e
