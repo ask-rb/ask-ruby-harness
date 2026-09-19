@@ -5,9 +5,9 @@ require "tmpdir"
 require "fileutils"
 
 # Prefer the sibling checkout (matches test_helper's local-gem pattern).
-sibling = File.expand_path("../../ask-local/lib", __dir__)
+sibling = File.expand_path("../../yamine/lib", __dir__)
 $LOAD_PATH.unshift(sibling) if File.directory?(sibling)
-require "ask-local"
+require "yamine"
 
 class DevUrlTest < Minitest::Test
   def setup
@@ -41,7 +41,7 @@ class DevUrlTest < Minitest::Test
   end
 
   def test_list_with_alias_route
-    store = Ask::Local::RouteStore.new(@dir)
+    store = Yamine::RouteStore.new(@dir)
     store.add_route("dockerapp.localhost", "127.0.0.1:8080", 0, kind: "tcp")
     result = @tool.call(action: "list")
     entry = result[:routes].first

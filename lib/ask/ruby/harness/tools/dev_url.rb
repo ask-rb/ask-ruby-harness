@@ -4,15 +4,15 @@ module Ask
   module Ruby
     module Harness
       module Tools
-        # Structured access to ask-local's stable dev URLs: active routes,
+        # Structured access to yamine's stable dev URLs: active routes,
         # plus name -> URL resolution that inherits the current directory's
         # variant context. Replaces scraping ports out of logs.
         #
-        # ask-local is an optional dependency: the tool degrades to a clear
+        # yamine is an optional dependency: the tool degrades to a clear
         # failure result when the gem is absent so harness hosts without it
         # lose nothing.
         class DevUrl < Ask::Ruby::Harness::Tool
-          description "List ask-local dev-server routes and resolve stable " \
+          description "List yamine dev-server routes and resolve stable " \
                        ".localhost URLs. Use instead of guessing ports: " \
                        "'list' shows every active route with its URL and " \
                        "backend; 'get' resolves a service name to its URL " \
@@ -22,12 +22,12 @@ module Ask
           param :name,   type: :string, desc: "Service name for get (e.g. backend)", required: false
 
           def execute(action: "list", name: nil)
-            unless defined?(Ask::Local)
+            unless defined?(Yamine)
               begin
-                require "ask-local"
+                require "yamine"
               rescue LoadError
                 return Ask::Result.failure(
-                  "ask-local is not installed. Add `gem \"ask-local\"` to the Gemfile " \
+                  "yamine is not installed. Add `gem \"yamine\"` to the Gemfile " \
                   "for stable .localhost dev URLs."
                 )
               end
@@ -43,14 +43,14 @@ module Ask
           private
 
           def list
-            store = Ask::Local::RouteStore.new(Ask::Local::Certs.state_dir)
+            store = Yamine::RouteStore.new(resolve_state_dir)
             routes = store.load_routes
-            port = Ask::Local::ProxyControl.proxy_port(store)
-            tls = Ask::Local::ProxyControl.proxy_tls(store)
+            port = Yamine::ProxyControl.proxy_port(store)
+            tls = Yamine::ProxyControl.proxy_tls(store)
             entries = routes.map do |route|
               {
                 hostname: route["hostname"],
-                url: Ask::Local::Hostname.url(route["hostname"], port: port, tls: tls),
+                url: Yamine::Hostname.url(route["hostname"], port: port, tls: tls),
                 target: route["target"],
                 kind: route["kind"],
                 supervised: !route["spec"].nil?,
@@ -58,23 +58,23 @@ module Ask
               }
             end
             { routes: entries, proxy_port: port, count: entries.length }
-          rescue Ask::Local::Error => e
+          rescue Yamine::Error => e
             Ask::Result.failure(e.message)
           end
 
           def get(name)
             return Ask::Result.failure("Name is required for action 'get'.") if name.nil? || name.to_s.strip.empty?
 
-            resolved = Ask::Local::Resolver.resolve(app_root.to_s)
-            hostnames = Ask::Local::Hostname.build(
-              app: Ask::Local::Sanitize.hostname_label(name),
-              tlds: [resolved.tld || Ask::Local::Hostname::DEFAULT_TLD],
+            resolved = Yamine::Resolver.resolve(app_root.to_s, variant: ENV["ASK_LOCAL_VARIANT"])
+            hostnames = Yamine::Hostname.build(
+              app: Yamine::Sanitize.hostname_label(name),
+              tlds: [resolved.tld || Yamine::Hostname::DEFAULT_TLD],
               variant: resolved.variant
             )
-            store = Ask::Local::RouteStore.new(Ask::Local::Certs.state_dir)
-            port = Ask::Local::ProxyControl.proxy_port(store)
-            tls = Ask::Local::ProxyControl.proxy_tls(store)
-            url = Ask::Local::Hostname.url(hostnames.first, port: port, tls: tls)
+            store = Yamine::RouteStore.new(resolve_state_dir)
+            port = Yamine::ProxyControl.proxy_port(store)
+            tls = Yamine::ProxyControl.proxy_tls(store)
+            url = Yamine::Hostname.url(hostnames.first, port: port, tls: tls)
             {
               name: name,
               url: url,
@@ -82,8 +82,14 @@ module Ask
               tld: resolved.tld,
               registered: !store.find(hostnames.first).nil?
             }
-          rescue Ask::Local::Error => e
+          rescue Yamine::Error => e
             Ask::Result.failure(e.message)
+          end
+
+          # Bridge the ASK_LOCAL_STATE_DIR env var (used by the ask-local
+          # harness) to yamine's YAMINE_STATE_DIR / default ~/.yamine path.
+          def resolve_state_dir
+            ENV["ASK_LOCAL_STATE_DIR"] || Yamine::Certs.state_dir
           end
         end
       end
