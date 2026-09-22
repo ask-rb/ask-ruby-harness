@@ -46,6 +46,14 @@ class GemspecTest < Minitest::Test
     assert_includes deps, "ask-tools"
     assert_includes deps, "ask-tools-shell"
     assert_includes deps, "ask-agent"
+    assert_includes deps, "ask-permissions"
     assert_includes deps, "activerecord"
+  end
+
+  def test_ask_permissions_version_requirement
+    dep = @gemspec.runtime_dependencies.find { |d| d.name == "ask-permissions" }
+    assert dep, "ask-permissions should be a runtime dependency"
+    assert dep.requirement.satisfied_by?(Gem::Version.new("0.1.0"))
+    refute dep.requirement.satisfied_by?(Gem::Version.new("0.0.9"))
   end
 end

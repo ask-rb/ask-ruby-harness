@@ -20,7 +20,7 @@ module Ask
       #   end
       #
       class EnvironmentPermissions
-        # @return [Symbol, nil] Access mode for ask-agent's Permissions extension
+        # @return [Symbol, nil] Access mode for ask-permissions' Permissions extension
         #   (:full_access, :read_only, :ask_before_changes)
         attr_accessor :mode
 

@@ -2,6 +2,7 @@
 
 require "active_record"
 require "ask/agent"
+require "ask/permissions"
 require "time"
 require "yaml"
 
@@ -129,7 +130,7 @@ module Ask
           env_mode = configuration.effective_mode
           return {} unless env_mode
 
-          perms = Ask::Agent::Policies::Permissions.new(mode: env_mode)
+          perms = Ask::Permissions::Permissions.new(mode: env_mode)
           { before_tool: [perms.method(:before_tool_call)] }
         rescue ArgumentError => e
           warn "[ask-ruby-harness] Invalid environment mode: #{e.message}"
