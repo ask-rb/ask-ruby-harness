@@ -3,7 +3,7 @@
 module Ask
   module Ruby
     module Harness
-      VERSION = "0.3.12"
+      VERSION = "0.3.13"
     end
   end
 end
