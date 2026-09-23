@@ -1,3 +1,13 @@
+## [Unreleased]
+
+## [0.3.14] — 2026-09-23
+
+### Changed
+
+- **Permissions now come from `ask-permissions`** — the harness reads its
+  environment permission modes and command allow/deny lists from the
+  `ask-permissions` gem instead of maintaining them locally.
+
 ## [0.3.2] — 2026-08-12
 
 ### Fixed

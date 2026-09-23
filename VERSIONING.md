@@ -32,6 +32,19 @@ Patch numbers advance by exactly one per release: `0.3.11` → `0.3.12` →
 even when several fixes ship together — they ship as a single release with a
 single patch number. The same one-step rule applies to minor and major.
 
+### Patch digit range and rollover
+
+The PATCH component ranges only over the digits `0` through `9`. After
+patch `9`, the next release rolls MINOR up by one and resets PATCH to `0`
+(e.g. `0.3.9` → `0.4.0`).
+
+### One-time bridge: 0.3.14 → 0.4.0
+
+`0.3.14` is already published to RubyGems. **Do not rewrite it.** The next
+release must be `0.4.0` — never re-publish `0.3.14` or any other `0.3.x`
+version. This is a one-time bridge documenting the published state, not a
+standing exception to the patch digit rule above.
+
 ## Changelog workflow (Unreleased)
 
 - `CHANGELOG.md` keeps an `## [Unreleased]` section at the top.
