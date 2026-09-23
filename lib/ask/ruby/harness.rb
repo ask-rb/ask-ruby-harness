@@ -41,8 +41,7 @@ module Ask
           tools = configuration.tools.map { |t| t.is_a?(Class) ? t.new : t }
           prompt = extra.delete(:system_prompt) || configuration.system_prompt || default_system_prompt
 
-          # Resolve environment-specific permissions and wire into agent hooks
-          hooks = build_environment_hooks
+          apply_environment_approval!(extra)
 
           Ask::Agent::Session.new(
             model: configuration.default_model,
@@ -50,7 +49,6 @@ module Ask
             system_prompt: prompt,
             tools: tools,
             state: configuration.persistence_adapter,
-            hooks: hooks,
             **extra
           )
         end
@@ -126,15 +124,24 @@ module Ask
 
         private
 
-        def build_environment_hooks
+        # Merge the resolved environment mode into the caller's Ask Agent
+        # approval config as +approval: {mode: env_mode}+, preserving any
+        # other caller approval options. Raises ArgumentError when the caller
+        # supplies a conflicting mode. With no environment mode, the caller's
+        # approval passes through unchanged.
+        def apply_environment_approval!(extra)
           env_mode = configuration.effective_mode
-          return {} unless env_mode
+          return unless env_mode
 
-          perms = Ask::Permissions::Permissions.new(mode: env_mode)
-          { before_tool: [perms.method(:before_tool_call)] }
-        rescue ArgumentError => e
-          warn "[ask-ruby-harness] Invalid environment mode: #{e.message}"
-          {}
+          caller_approval = extra[:approval] || {}
+          caller_mode = caller_approval[:mode] if caller_approval.is_a?(Hash)
+          if caller_mode && caller_mode != env_mode
+            raise ArgumentError,
+                  "conflicting approval mode: caller specified #{caller_mode.inspect}, " \
+                  "environment config specifies #{env_mode.inspect}"
+          end
+
+          extra[:approval] = caller_approval.merge(mode: env_mode)
         end
 
         def prune_old_sessions

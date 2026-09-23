@@ -53,6 +53,23 @@ Ask::Ruby::Harness.discover_tools!
 session = Ask::Ruby::Harness.agent_session(model: "gpt-4o")
 ```
 
+The configured `env.mode` is passed to the Ask Agent session as its
+approval mode (`approval: {mode: ...}`); the session owns the shared
+policy, approval queue, and approvals. With `env.mode = :ask_before_changes`,
+state-changing tool calls wait on `session.approval_queue` — the host
+drains it and answers each request to let the agent continue:
+
+```ruby
+session = Ask::Ruby::Harness.agent_session
+# while the agent runs:
+request = session.approval_queue.pop
+session.approve(request) # or session.deny(request)
+```
+
+Callers may pass their own `approval:` options through `agent_session`;
+extra options are preserved, and a caller-supplied `approval[:mode]` that
+conflicts with the environment mode raises `ArgumentError`.
+
 The Rails edition (`ask-rails-harness`) mounts an agent at `/ask` and adds
 framework-native tools (routes, engine) on top of this gem.
 

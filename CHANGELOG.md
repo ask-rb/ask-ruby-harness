@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+### Changed
+
+- **Environment mode flows through Ask Agent approvals** — `agent_session`
+  now passes `configuration.effective_mode` as `approval: {mode: ...}` to
+  `Ask::Agent::Session` (merging and preserving caller `approval:` options)
+  instead of building `Ask::Permissions` `before_tool` hooks. The session
+  owns the shared policy, approval queue, and approvals
+  (`session.approval_queue` for `:ask_before_changes`). A caller-supplied
+  `approval[:mode]` that conflicts with the environment mode raises
+  `ArgumentError`; with no environment mode the caller's approval passes
+  through unchanged.
+
 ## [0.3.14] — 2026-09-23
 
 ### Changed
