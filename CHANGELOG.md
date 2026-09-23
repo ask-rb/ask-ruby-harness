@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-23
+
 ### Changed
 
 - **Environment mode flows through Ask Agent approvals** — `agent_session`
@@ -11,7 +13,6 @@
   `approval[:mode]` that conflicts with the environment mode raises
   `ArgumentError`; with no environment mode the caller's approval passes
   through unchanged.
-
 ## [0.3.14] — 2026-09-23
 
 ### Changed
