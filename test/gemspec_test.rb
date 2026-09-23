@@ -53,7 +53,7 @@ class GemspecTest < Minitest::Test
   def test_ask_permissions_version_requirement
     dep = @gemspec.runtime_dependencies.find { |d| d.name == "ask-permissions" }
     assert dep, "ask-permissions should be a runtime dependency"
-    assert dep.requirement.satisfied_by?(Gem::Version.new("0.2.0"))
-    refute dep.requirement.satisfied_by?(Gem::Version.new("0.1.9"))
+    assert dep.requirement.satisfied_by?(Gem::Version.new("0.3.0"))
+    refute dep.requirement.satisfied_by?(Gem::Version.new("0.2.9"))
   end
 end
