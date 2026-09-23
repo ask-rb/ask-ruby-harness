@@ -124,24 +124,34 @@ module Ask
 
         private
 
-        # Merge the resolved environment mode into the caller's Ask Agent
-        # approval config as +approval: {mode: env_mode}+, preserving any
-        # other caller approval options. Raises ArgumentError when the caller
-        # supplies a conflicting mode. With no environment mode, the caller's
-        # approval passes through unchanged.
+        # Normalize the caller's approval against the resolved environment
+        # mode: nil/true becomes {mode: env_mode}; a Hash merges, preserving
+        # all entries and rejecting only a different supplied :mode; an
+        # Ask::Permissions::ApprovalQueue becomes {queue:, mode:}; false or
+        # unsupported types raise ArgumentError. With no environment mode the
+        # caller's approval passes through unchanged.
         def apply_environment_approval!(extra)
           env_mode = configuration.effective_mode
           return unless env_mode
 
-          caller_approval = extra[:approval] || {}
-          caller_mode = caller_approval[:mode] if caller_approval.is_a?(Hash)
-          if caller_mode && caller_mode != env_mode
-            raise ArgumentError,
-                  "conflicting approval mode: caller specified #{caller_mode.inspect}, " \
-                  "environment config specifies #{env_mode.inspect}"
-          end
-
-          extra[:approval] = caller_approval.merge(mode: env_mode)
+          approval = extra[:approval]
+          extra[:approval] =
+            case approval
+            when nil, true
+              {mode: env_mode}
+            when Hash
+              caller_mode = approval[:mode]
+              if caller_mode && caller_mode != env_mode
+                raise ArgumentError,
+                      "conflicting approval mode: caller specified #{caller_mode.inspect}, " \
+                      "environment config specifies #{env_mode.inspect}"
+              end
+              approval.merge(mode: env_mode)
+            when Ask::Permissions::ApprovalQueue
+              {queue: approval, mode: env_mode}
+            else
+              raise ArgumentError, "unsupported approval: #{approval.inspect}"
+            end
         end
 
         def prune_old_sessions

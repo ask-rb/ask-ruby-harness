@@ -41,6 +41,29 @@ class EnvironmentPermissionsTest < Minitest::Test
     end
   end
 
+  def test_agent_session_wraps_true_approval_with_env_mode
+    with_configuration(Ask::Ruby::Harness.env.to_sym, :read_only) do
+      captured = nil
+      Ask::Agent::Session.stub(:new, ->(**kwargs) { captured = kwargs; Object.new }) do
+        Ask::Ruby::Harness.agent_session(approval: true)
+      end
+
+      assert_equal({mode: :read_only}, captured[:approval])
+    end
+  end
+
+  def test_agent_session_wraps_approval_queue_with_env_mode
+    with_configuration(Ask::Ruby::Harness.env.to_sym, :read_only) do
+      queue = Ask::Permissions::ApprovalQueue.allocate
+      captured = nil
+      Ask::Agent::Session.stub(:new, ->(**kwargs) { captured = kwargs; Object.new }) do
+        Ask::Ruby::Harness.agent_session(approval: queue)
+      end
+
+      assert_equal({queue: queue, mode: :read_only}, captured[:approval])
+    end
+  end
+
   def test_agent_session_preserves_caller_approval_options
     with_configuration(Ask::Ruby::Harness.env.to_sym, :read_only) do
       captured = nil

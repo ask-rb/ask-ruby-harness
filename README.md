@@ -62,8 +62,14 @@ drains it and answers each request to let the agent continue:
 ```ruby
 session = Ask::Ruby::Harness.agent_session
 # while the agent runs:
-request = session.approval_queue.pop
-session.approve(request) # or session.deny(request)
+queue = session.approval_queue
+queue.pending_actions.each do |action|
+  if permitted?(action)
+    queue.approve(action.id)
+  else
+    queue.reject(action.id, feedback: "not permitted in this environment")
+  end
+end
 ```
 
 Callers may pass their own `approval:` options through `agent_session`;
